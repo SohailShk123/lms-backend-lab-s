@@ -300,6 +300,52 @@ app.post('/api/admin/toggle-status', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// ==========================================
+// ☁️ CLOUD SYNC SCHEMA & ROUTE
+// ==========================================
+
+// 1. Data Sync Schema
+const SyncDataSchema = new mongoose.Schema({
+  labId: { type: String, required: true },
+  tableName: { type: String, required: true }, // Jaise: 'bookings', 'reports', 'doctors'
+  localId: { type: Number, required: true },   // SQLite ka apna ID
+  recordData: { type: Object, required: true },// Poora data yahan aayega
+  lastSyncedAt: { type: Date, default: Date.now }
+});
+
+// Yeh line duplicate data aane se rokegi (labId + tableName + localId ka combination unique hoga)
+SyncDataSchema.index({ labId: 1, tableName: 1, localId: 1 }, { unique: true });
+
+const SyncRecord = mongoose.models.SyncRecord || mongoose.model('SyncRecord', SyncDataSchema);
+
+// 2. Sync API Endpoint
+app.post('/api/sync-data', async (req, res) => {
+  try {
+    await connectDB();
+    const { labId, records } = req.body; 
+    // records ke andar array hoga: [{ tableName: 'bookings', localId: 1, recordData: {...} }, ...]
+
+    if (!labId || !records || records.length === 0) {
+      return res.json({ success: true, message: "No data to sync" });
+    }
+
+    // BulkWrite operation banayenge (Ek sath saara data check aur update hoga)
+    const bulkOperations = records.map(record => ({
+      updateOne: {
+        filter: { labId: labId, tableName: record.tableName, localId: record.localId },
+        update: { $set: { recordData: record.recordData, lastSyncedAt: new Date() } },
+        upsert: true // Agar pehle se hai toh Update, nahi toh Insert! (No Duplicates)
+      }
+    }));
+
+    // Data MongoDB me save karo
+    await SyncRecord.bulkWrite(bulkOperations);
+
+    res.json({ success: true, message: "Data synced successfully without duplicates!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = app;
 
