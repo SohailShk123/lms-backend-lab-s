@@ -4,6 +4,32 @@ const mongoose = require('mongoose');
 const app = express(); 
 app.use(express.json()); 
 
+// 🚀 VERCEL SERVERLESS DB CONNECTION LOGIC
+let isConnected = false;
+const connectDB = async () => {
+  if (isConnected) return; // Agar pehle se connected hai toh wapas connect mat karo
+  try {
+    const MONGO_URI = process.env.MONGO_URI; 
+    if (!MONGO_URI) throw new Error("MONGO_URI environment variable is missing!");
+    
+    const db = await mongoose.connect(MONGO_URI);
+    isConnected = db.connections[0].readyState === 1;
+    console.log("MongoDB Connected Successfully for Serverless!");
+  } catch (error) {
+    console.error("MongoDB Connection Error:", error);
+    throw error;
+  }
+};
+
+// License Schema 
+const LicenseSchema = new mongoose.Schema({ 
+  labId: { type: String, required: true, unique: true }, 
+  labName: String, 
+  expiryDate: String, 
+  working: { type: Boolean, default: true } 
+}); 
+const License = mongoose.models.License || mongoose.model('License', LicenseSchema); 
+
 // Browser check ke liye route
 app.get('/', (req, res) => {
   res.send("🚀 LIMS Licensing Server is RUNNING Successfully!");
@@ -106,30 +132,18 @@ app.get('/admin', (req, res) => {
   `);
 });
 
-// MongoDB Connection 
-const MONGO_URI = process.env.MONGO_URI || 'YOUR_MONGODB_ATLAS_URI_HERE'; 
-mongoose.connect(MONGO_URI) 
-  .then(() => console.log('MongoDB Connected Successfully')) 
-  .catch(err => console.error('MongoDB Connection Error:', err)); 
-
-// License Schema 
-const LicenseSchema = new mongoose.Schema({ 
-  labId: { type: String, required: true, unique: true }, 
-  labName: String, 
-  expiryDate: String, // Format: "2027-10-13" 
-  working: { type: Boolean, default: true } 
-}); 
-const License = mongoose.model('License', LicenseSchema); 
-
 // 1. API: Check License Status (Electron app isko call karegi) 
 app.post('/api/check-license', async (req, res) => { 
   try { 
+    await connectDB(); // Puraane code ki jagah yahan connection ensure hoga
     const { labId } = req.body; 
     if (!labId) return res.status(400).json({ error: 'Lab ID is required' }); 
+    
     let license = await License.findOne({ labId }); 
     if (!license) { 
       return res.json({ working: false, message: 'Lab not registered on cloud' }); 
     } 
+    
     const today = new Date().toISOString().split('T')[0]; 
     if (today > license.expiryDate) { 
       license.working = false; 
@@ -144,10 +158,13 @@ app.post('/api/check-license', async (req, res) => {
 // 2. API: Admin Dashboard se Lab Add karne ya Expiry Extend karne ke liye 
 app.post('/api/admin/upsert-license', async (req, res) => { 
   try { 
+    await connectDB(); // Yahan bhi database connection ensure hoga
     const { labId, labName, expiryDate, working, adminSecret } = req.body; 
+    
     if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') { 
       return res.status(401).json({ error: 'Unauthorized' }); 
     } 
+    
     const updated = await License.findOneAndUpdate( 
       { labId }, { labName, expiryDate, working }, { upsert: true, new: true } 
     ); 
@@ -157,8 +174,9 @@ app.post('/api/admin/upsert-license', async (req, res) => {
   } 
 }); 
 
-// Export the app for Vercel (Very Important!)
 module.exports = app;
 
 const PORT = process.env.PORT || 3000; 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
