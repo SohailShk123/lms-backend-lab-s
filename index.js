@@ -19,10 +19,12 @@ const connectDB = async () => {
   }
 };
 
-// License Schema 
+// 🛡️ License Schema (UPDATED WITH PIN & MAC ADDRESS)
 const LicenseSchema = new mongoose.Schema({ 
   labId: { type: String, required: true, unique: true }, 
   labName: String, 
+  pin: { type: String, required: true }, // NEW: 4-digit PIN
+  macAddress: { type: String, default: "" }, // NEW: Hardware Lock
   expiryDate: String, 
   working: { type: Boolean, default: true } 
 }); 
@@ -58,8 +60,8 @@ app.get('/admin', (req, res) => {
         </div>
       </div>
 
-      <!-- 🎛️ MAIN DASHBOARD (Hidden by default) -->
-      <div id="mainDashboard" class="hidden max-w-5xl mx-auto py-10 px-4">
+      <!-- 🎛️ MAIN DASHBOARD -->
+      <div id="mainDashboard" class="hidden max-w-6xl mx-auto py-10 px-4">
         <div class="flex justify-between items-center mb-8">
           <h1 class="text-3xl font-black text-blue-700">LIMS Admin Control</h1>
           <button onclick="logout()" class="text-sm font-bold text-red-600 hover:underline">Logout</button>
@@ -67,13 +69,17 @@ app.get('/admin', (req, res) => {
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
           
-          <!-- Add New Lab Form -->
+          <!-- Add New Lab Form (UPDATED WITH PIN) -->
           <div class="bg-white p-6 rounded-xl shadow-lg h-fit">
             <h2 class="text-xl font-bold mb-4">Add New Lab</h2>
             <form id="licenseForm" class="flex flex-col gap-4">
               <div>
                 <label class="text-sm font-bold text-gray-700">Lab ID (Sequence)</label>
                 <input type="text" id="labId" placeholder="e.g. LAB_001" required class="w-full p-2 border rounded outline-none focus:border-blue-500 uppercase mt-1">
+              </div>
+              <div>
+                <label class="text-sm font-bold text-gray-700">Login PIN (4-Digit)</label>
+                <input type="text" id="labPin" placeholder="e.g. 1234" required maxlength="4" class="w-full p-2 border rounded outline-none focus:border-blue-500 mt-1">
               </div>
               <div>
                 <label class="text-sm font-bold text-gray-700">Lab Name</label>
@@ -90,16 +96,18 @@ app.get('/admin', (req, res) => {
             <div id="formMsg" class="mt-3 text-center font-bold text-sm hidden"></div>
           </div>
 
-          <!-- Labs List Table -->
-          <div class="bg-white p-6 rounded-xl shadow-lg md:col-span-2 overflow-x-auto">
-            <h2 class="text-xl font-bold mb-4">Registered Labs</h2>
+          <!-- Labs List Table (SCROLL ADDED HERE) -->
+          <div class="bg-white p-6 rounded-xl shadow-lg md:col-span-2 max-h-[550px] overflow-y-auto">
+            <h2 class="text-xl font-bold mb-4 sticky top-0 bg-white z-10 py-2">Registered Labs</h2>
             <table class="w-full text-left border-collapse">
-              <thead>
-                <tr class="bg-gray-100 text-gray-600 text-sm uppercase">
+              <thead class="sticky top-12 bg-gray-100 z-10">
+                <tr class="text-gray-600 text-sm uppercase">
                   <th class="p-3 border-b">Lab ID</th>
                   <th class="p-3 border-b">Lab Name</th>
+                  <th class="p-3 border-b">PIN</th>
                   <th class="p-3 border-b">Expiry</th>
-                  <th class="p-3 border-b text-center">App Access (ON/OFF)</th>
+                  <th class="p-3 border-b text-center">App Access</th>
+                  <th class="p-3 border-b text-center">Hardware Lock</th>
                 </tr>
               </thead>
               <tbody id="labsTableBody">
@@ -116,10 +124,8 @@ app.get('/admin', (req, res) => {
         async function login() {
           const input = document.getElementById('secretInput').value;
           if(!input) return;
-          
           adminSecret = input;
           const success = await fetchLabs();
-          
           if(success) {
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainDashboard').style.display = 'block';
@@ -146,54 +152,58 @@ app.get('/admin', (req, res) => {
               body: JSON.stringify({ adminSecret })
             });
             const data = await res.json();
-            
-            if(res.ok) {
-              renderTable(data.licenses);
-              return true;
-            }
+            if(res.ok) { renderTable(data.licenses); return true; }
             return false;
-          } catch (e) {
-            return false;
-          }
+          } catch (e) { return false; }
         }
 
         function renderTable(licenses) {
           const tbody = document.getElementById('labsTableBody');
           tbody.innerHTML = '';
-          
           licenses.forEach(lab => {
             const row = document.createElement('tr');
-            row.className = 'border-b hover:bg-gray-50 transition';
+            row.className = 'border-b hover:bg-gray-50 transition text-sm';
             
-            // Toggle Button HTML
             const toggleHtml = lab.working 
-              ? \`<button onclick="toggleStatus('\${lab.labId}', false)" class="bg-green-500 text-white px-4 py-1 rounded-full font-bold text-xs w-20 shadow-md">ON</button>\`
-              : \`<button onclick="toggleStatus('\${lab.labId}', true)" class="bg-red-500 text-white px-4 py-1 rounded-full font-bold text-xs w-20 shadow-md">OFF</button>\`;
+              ? \`<button onclick="toggleStatus('\${lab.labId}', false)" class="bg-green-500 text-white px-3 py-1 rounded-full font-bold text-xs w-16 shadow-md">ON</button>\`
+              : \`<button onclick="toggleStatus('\${lab.labId}', true)" class="bg-red-500 text-white px-3 py-1 rounded-full font-bold text-xs w-16 shadow-md">OFF</button>\`;
+
+            const resetMacHtml = lab.macAddress
+              ? \`<button onclick="resetMac('\${lab.labId}')" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold text-xs shadow-md">Reset PC</button>\`
+              : \`<span class="text-gray-400 text-xs italic">Not Locked</span>\`;
 
             row.innerHTML = \`
               <td class="p-3 font-bold text-blue-700">\${lab.labId}</td>
               <td class="p-3 font-semibold">\${lab.labName}</td>
-              <td class="p-3 text-sm text-gray-500">\${lab.expiryDate}</td>
+              <td class="p-3 text-gray-700 font-mono">\${lab.pin}</td>
+              <td class="p-3 text-gray-500">\${lab.expiryDate}</td>
               <td class="p-3 text-center">\${toggleHtml}</td>
+              <td class="p-3 text-center">\${resetMacHtml}</td>
             \`;
             tbody.appendChild(row);
           });
         }
 
         async function toggleStatus(labId, newStatus) {
-          try {
-            await fetch('/api/admin/toggle-status', {
+          await fetch('/api/admin/toggle-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ labId, working: newStatus, adminSecret })
+          });
+          fetchLabs();
+        }
+
+        async function resetMac(labId) {
+          if(confirm("Unlock this license? The user will have to login again on their new PC.")) {
+            await fetch('/api/admin/reset-mac', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ labId, working: newStatus, adminSecret })
+              body: JSON.stringify({ labId, adminSecret })
             });
-            fetchLabs(); // Refresh list automatically
-          } catch(e) {
-            alert("Network Error!");
+            fetchLabs();
           }
         }
 
-        // Add new Lab
         document.getElementById('licenseForm').addEventListener('submit', async (e) => {
           e.preventDefault();
           const msgBox = document.getElementById('formMsg');
@@ -202,9 +212,10 @@ app.get('/admin', (req, res) => {
 
           const payload = {
             labId: document.getElementById('labId').value.toUpperCase(),
+            pin: document.getElementById('labPin').value,
             labName: document.getElementById('labName').value,
             expiryDate: document.getElementById('expiryDate').value,
-            working: true, // Hamesha ON rahega new lab ke liye
+            working: true,
             adminSecret: adminSecret
           };
 
@@ -218,12 +229,11 @@ app.get('/admin', (req, res) => {
             msgBox.className = "mt-3 text-green-600 font-bold block";
             msgBox.innerText = "✅ Created Successfully!";
             document.getElementById('licenseForm').reset();
-            fetchLabs(); // Table update karo
+            fetchLabs();
           } else {
             msgBox.className = "mt-3 text-red-600 font-bold block";
             msgBox.innerText = "❌ Failed!";
           }
-          
           setTimeout(() => msgBox.style.display = 'none', 3000);
         });
       </script>
@@ -236,36 +246,62 @@ app.get('/admin', (req, res) => {
 // ⚙️ API ROUTES 
 // ----------------------------------------------------
 
-// 1. App se Check License
+// 1. App se Check License (UPDATED WITH PIN & MAC LOCK)
 app.post('/api/check-license', async (req, res) => { 
   try { 
     await connectDB(); 
-    const { labId } = req.body; 
-    if (!labId) return res.status(400).json({ error: 'Lab ID is required' }); 
+    const { labId, pin, macAddress } = req.body; 
+    
+    if (!labId || !pin || !macAddress) {
+      return res.json({ working: false, message: 'Incomplete login details.' });
+    }
     
     let license = await License.findOne({ labId }); 
-    if (!license) return res.json({ working: false, message: 'Lab not registered on cloud' }); 
+    if (!license) return res.json({ working: false, message: 'Invalid Lab ID.' }); 
     
+    // Check 1: Match PIN
+    if (license.pin !== pin) {
+      return res.json({ working: false, message: 'Incorrect PIN.' });
+    }
+
+    // Check 2: Expiry
     const today = new Date().toISOString().split('T')[0]; 
     if (today > license.expiryDate) { 
       license.working = false; 
       await license.save(); 
+      return res.json({ working: false, message: 'License Expired.' });
     } 
-    res.json({ working: license.working, expiryDate: license.expiryDate, labName: license.labName }); 
+
+    // Check 3: App Access Blocked?
+    if (!license.working) {
+      return res.json({ working: false, message: 'Access blocked by Admin.' });
+    }
+
+    // Check 4: MAC Address Hardware Lock
+    if (!license.macAddress) {
+      // First time login - Lock this PC
+      license.macAddress = macAddress;
+      await license.save();
+    } else if (license.macAddress !== macAddress) {
+      // Someone trying to use it on a different PC
+      return res.json({ working: false, message: 'License locked to another PC. Contact Admin to reset.' });
+    }
+    
+    res.json({ working: true, expiryDate: license.expiryDate, labName: license.labName }); 
   } catch (err) { 
     res.status(500).json({ error: err.message }); 
   } 
 }); 
 
-// 2. Add New Lab from Dashboard
+// 2. Add New Lab from Dashboard (UPDATED)
 app.post('/api/admin/upsert-license', async (req, res) => { 
   try { 
     await connectDB();
-    const { labId, labName, expiryDate, working, adminSecret } = req.body; 
+    const { labId, labName, pin, expiryDate, working, adminSecret } = req.body; 
     if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
     
     const updated = await License.findOneAndUpdate( 
-      { labId }, { labName, expiryDate, working }, { upsert: true, new: true } 
+      { labId }, { labName, pin, expiryDate, working }, { upsert: true, new: true } 
     ); 
     res.json({ success: true, updated }); 
   } catch (err) { 
@@ -273,75 +309,74 @@ app.post('/api/admin/upsert-license', async (req, res) => {
   } 
 }); 
 
-// 3. Get All Labs for Dashboard Table
+// 3. Reset Hardware Lock (NEW ROUTE)
+app.post('/api/admin/reset-mac', async (req, res) => {
+  try {
+    await connectDB();
+    const { labId, adminSecret } = req.body;
+    if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
+
+    await License.findOneAndUpdate({ labId }, { macAddress: "" });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Get All Labs for Dashboard Table
 app.post('/api/admin/get-all', async (req, res) => {
   try {
     await connectDB();
     const { adminSecret } = req.body;
     if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
-    
-    const licenses = await License.find().sort({ _id: -1 }); // Latest sabse upar
+    const licenses = await License.find().sort({ _id: -1 }); 
     res.json({ success: true, licenses });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 4. Toggle ON/OFF Status
+// 5. Toggle ON/OFF Status
 app.post('/api/admin/toggle-status', async (req, res) => {
   try {
     await connectDB();
     const { labId, working, adminSecret } = req.body;
     if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
-
     await License.findOneAndUpdate({ labId }, { working });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-// ==========================================
-// ☁️ CLOUD SYNC SCHEMA & ROUTE
-// ==========================================
 
-// 1. Data Sync Schema
+// ==========================================
+// ☁️ CLOUD SYNC SCHEMA & ROUTE (REMAINS SAME)
+// ==========================================
 const SyncDataSchema = new mongoose.Schema({
   labId: { type: String, required: true },
-  tableName: { type: String, required: true }, // Jaise: 'bookings', 'reports', 'doctors'
-  localId: { type: Number, required: true },   // SQLite ka apna ID
-  recordData: { type: Object, required: true },// Poora data yahan aayega
+  tableName: { type: String, required: true }, 
+  localId: { type: Number, required: true },  
+  recordData: { type: Object, required: true },
   lastSyncedAt: { type: Date, default: Date.now }
 });
-
-// Yeh line duplicate data aane se rokegi (labId + tableName + localId ka combination unique hoga)
 SyncDataSchema.index({ labId: 1, tableName: 1, localId: 1 }, { unique: true });
-
 const SyncRecord = mongoose.models.SyncRecord || mongoose.model('SyncRecord', SyncDataSchema);
 
-// 2. Sync API Endpoint
 app.post('/api/sync-data', async (req, res) => {
   try {
     await connectDB();
     const { labId, records } = req.body; 
-    // records ke andar array hoga: [{ tableName: 'bookings', localId: 1, recordData: {...} }, ...]
+    if (!labId || !records || records.length === 0) return res.json({ success: true, message: "No data to sync" });
 
-    if (!labId || !records || records.length === 0) {
-      return res.json({ success: true, message: "No data to sync" });
-    }
-
-    // BulkWrite operation banayenge (Ek sath saara data check aur update hoga)
     const bulkOperations = records.map(record => ({
       updateOne: {
         filter: { labId: labId, tableName: record.tableName, localId: record.localId },
         update: { $set: { recordData: record.recordData, lastSyncedAt: new Date() } },
-        upsert: true // Agar pehle se hai toh Update, nahi toh Insert! (No Duplicates)
+        upsert: true 
       }
     }));
-
-    // Data MongoDB me save karo
     await SyncRecord.bulkWrite(bulkOperations);
-
-    res.json({ success: true, message: "Data synced successfully without duplicates!" });
+    res.json({ success: true, message: "Data synced successfully!" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
