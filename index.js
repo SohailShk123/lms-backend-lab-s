@@ -349,6 +349,26 @@ app.post('/api/admin/toggle-status', async (req, res) => {
   }
 });
 
+// ==========================================================
+// ☁️ RESTORE DATA API (Cloud to Local)
+// =========================================================
+app.post('/api/restore-data', async (req, res) => {
+  try {
+    await connectDB();
+    const { labId } = req.body;
+    
+    if (!labId) {
+      return res.json({ success: false, message: "Lab ID is required" });
+    }
+
+    // Cloud se us Lab ID ka saara data nikal lo
+    const records = await SyncRecord.find({ labId });
+    res.json({ success: true, records, message: "Data fetched successfully!" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ==========================================
 // ☁️ CLOUD SYNC SCHEMA & ROUTE (REMAINS SAME)
 // ==========================================
