@@ -1,5 +1,6 @@
 const express = require('express'); 
 const mongoose = require('mongoose'); 
+require('dotenv').config();
 
 const app = express(); 
 app.use(express.json()); 
@@ -69,7 +70,7 @@ app.get('/admin', (req, res) => {
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
           
-          <!-- Add New Lab Form (UPDATED WITH PIN) -->
+          <!-- Add New Lab Form -->
           <div class="bg-white p-6 rounded-xl shadow-lg h-fit">
             <h2 class="text-xl font-bold mb-4">Add New Lab</h2>
             <form id="licenseForm" class="flex flex-col gap-4">
@@ -96,7 +97,7 @@ app.get('/admin', (req, res) => {
             <div id="formMsg" class="mt-3 text-center font-bold text-sm hidden"></div>
           </div>
 
-          <!-- Labs List Table (SCROLL ADDED HERE) -->
+          <!-- Labs List Table -->
           <div class="bg-white p-6 rounded-xl shadow-lg md:col-span-2 max-h-[550px] overflow-y-auto">
             <h2 class="text-xl font-bold mb-4 sticky top-0 bg-white z-10 py-2">Registered Labs</h2>
             <table class="w-full text-left border-collapse">
@@ -160,6 +161,15 @@ app.get('/admin', (req, res) => {
         function renderTable(licenses) {
           const tbody = document.getElementById('labsTableBody');
           tbody.innerHTML = '';
+          
+          // Check for expired function
+          const isExpired = (dateString) => {
+            if (!dateString) return false;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            return new Date(dateString) < today;
+          };
+
           licenses.forEach(lab => {
             const row = document.createElement('tr');
             row.className = 'border-b hover:bg-gray-50 transition text-sm';
@@ -172,11 +182,20 @@ app.get('/admin', (req, res) => {
               ? \`<button onclick="resetMac('\${lab.labId}')" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold text-xs shadow-md">Reset PC</button>\`
               : \`<span class="text-gray-400 text-xs italic">Not Locked</span>\`;
 
+            // 👇 NAYA RENEW BUTTON ADD KIYA HAI 👇
+            const expiredStyle = isExpired(lab.expiryDate) ? 'text-red-600 font-bold bg-red-50 px-1 rounded' : 'text-gray-500';
+            const expiryHtml = \`
+              <div class="flex items-center gap-2">
+                <span class="\${expiredStyle}">\${lab.expiryDate}</span>
+                <button onclick="renewLab('\${lab.labId}', '\${lab.expiryDate}')" class="bg-blue-100 text-blue-700 hover:bg-blue-200 text-[10px] font-bold px-2 py-1 rounded transition-colors shadow-sm" title="Renew for 1 Year">+1 Yr</button>
+              </div>
+            \`;
+
             row.innerHTML = \`
               <td class="p-3 font-bold text-blue-700">\${lab.labId}</td>
               <td class="p-3 font-semibold">\${lab.labName}</td>
               <td class="p-3 text-gray-700 font-mono">\${lab.pin}</td>
-              <td class="p-3 text-gray-500">\${lab.expiryDate}</td>
+              <td class="p-3">\${expiryHtml}</td>
               <td class="p-3 text-center">\${toggleHtml}</td>
               <td class="p-3 text-center">\${resetMacHtml}</td>
             \`;
@@ -201,6 +220,39 @@ app.get('/admin', (req, res) => {
               body: JSON.stringify({ labId, adminSecret })
             });
             fetchLabs();
+          }
+        }
+
+        // 👇 NAYA RENEW LOGIC ADD KIYA HAI 👇
+        async function renewLab(labId, currentDate) {
+          if(!confirm(\`Are you sure you want to renew \${labId} for 1 year?\`)) return;
+          
+          let newDate;
+          if (currentDate) {
+             const d = new Date(currentDate);
+             d.setFullYear(d.getFullYear() + 1);
+             newDate = d.toISOString().split('T')[0];
+          } else {
+             const d = new Date();
+             d.setFullYear(d.getFullYear() + 1);
+             newDate = d.toISOString().split('T')[0];
+          }
+
+          try {
+            const res = await fetch('/api/admin/renew', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ labId, newExpiryDate: newDate, adminSecret })
+            });
+            
+            if(res.ok) {
+              alert("Lab successfully renewed for 1 Year!");
+              fetchLabs(); // Refresh table
+            } else {
+              alert("Failed to renew lab.");
+            }
+          } catch (e) {
+            alert("Connection error!");
           }
         }
 
@@ -298,7 +350,7 @@ app.post('/api/admin/upsert-license', async (req, res) => {
   try { 
     await connectDB();
     const { labId, labName, pin, expiryDate, working, adminSecret } = req.body; 
-    if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
+    if (adminSecret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'Unauthorized' }); 
     
     const updated = await License.findOneAndUpdate( 
       { labId }, { labName, pin, expiryDate, working }, { upsert: true, new: true } 
@@ -314,7 +366,7 @@ app.post('/api/admin/reset-mac', async (req, res) => {
   try {
     await connectDB();
     const { labId, adminSecret } = req.body;
-    if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
+    if (adminSecret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'Unauthorized' }); 
 
     await License.findOneAndUpdate({ labId }, { macAddress: "" });
     res.json({ success: true });
@@ -328,7 +380,7 @@ app.post('/api/admin/get-all', async (req, res) => {
   try {
     await connectDB();
     const { adminSecret } = req.body;
-    if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
+    if (adminSecret !== process.env.ADMIN_SECRET ) return res.status(401).json({ error: 'Unauthorized' }); 
     const licenses = await License.find().sort({ _id: -1 }); 
     res.json({ success: true, licenses });
   } catch (err) {
@@ -341,14 +393,35 @@ app.post('/api/admin/toggle-status', async (req, res) => {
   try {
     await connectDB();
     const { labId, working, adminSecret } = req.body;
-    if (adminSecret !== 'MY_SUPER_SECRET_ADMIN_KEY_123') return res.status(401).json({ error: 'Unauthorized' }); 
+    if (adminSecret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'Unauthorized' }); 
     await License.findOneAndUpdate({ labId }, { working });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+// api renew route for super admin to renew license
+app.post('/api/admin/renew', async (req, res) => {
+  const { adminSecret, labId, newExpiryDate } = req.body;
+  
+  // 👇 Yahan hum process.env use kar rahe hain
+  if (adminSecret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ success: false, message: 'Invalid Admin Secret' });
+  }
 
+  try {
+    const license = await License.findOne({ labId });
+    if (!license) return res.status(404).json({ success: false, message: 'License not found' });
+    
+    license.expiryDate = newExpiryDate;
+    license.working = true; // Automatically turn ON if renewed
+    await license.save();
+    
+    res.json({ success: true, message: 'Renewed successfully', license });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 // ==========================================================
 // ☁️ RESTORE DATA API (Cloud to Local)
 // =========================================================
