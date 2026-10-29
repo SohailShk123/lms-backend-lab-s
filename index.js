@@ -425,23 +425,72 @@ app.post('/api/admin/renew', async (req, res) => {
 // ==========================================================
 // ☁️ RESTORE DATA API (Cloud to Local)
 // =========================================================
-app.post('/api/restore-data', async (req, res) => {
+// app.post('/api/restore-data', async (req, res) => {
+//   try {
+//     await connectDB();
+//     const { labId } = req.body;
+    
+//     if (!labId) {
+//       return res.json({ success: false, message: "Lab ID is required" });
+//     }
+
+//     // Cloud se us Lab ID ka saara data nikal lo
+//     const records = await SyncRecord.find({ labId });
+//     res.json({ success: true, records, message: "Data fetched successfully!" });
+//   } catch (err) {
+//     res.status(500).json({ success: false, error: err.message });
+//   }
+// });
+app.post('/api/get-backup-size', async (req, res) => {
   try {
     await connectDB();
     const { labId } = req.body;
     
     if (!labId) {
+      return res.status(400).json({ success: false, message: "Lab ID is required" });
+    }
+
+    // Cloud database (MongoDB) se total records count kar raha hai
+    const totalRecords = await SyncRecord.countDocuments({ labId });
+
+    return res.json({ 
+      success: true, 
+      totalRecords: totalRecords 
+    });
+
+  } catch (error) {
+    console.error("Backup size error:", error);
+    return res.status(500).json({ success: false, totalRecords: 0 });
+  }
+});
+app.post('/api/restore-data', async (req, res) => {
+  try {
+    await connectDB();
+    
+    // Frontend ab page aur limit bhi bhejega
+    const { labId, page = 1, limit = 500 } = req.body;
+    
+    if (!labId) {
       return res.json({ success: false, message: "Lab ID is required" });
     }
 
-    // Cloud se us Lab ID ka saara data nikal lo
-    const records = await SyncRecord.find({ labId });
-    res.json({ success: true, records, message: "Data fetched successfully!" });
+    // Calculate OFFSET (Kitne records chhodne hain)
+    const skipAmount = (page - 1) * limit;
+
+    // Cloud (MongoDB) se data uthao, limit lagakar (taaki app hang na ho)
+    const records = await SyncRecord.find({ labId })
+      .skip(skipAmount)
+      .limit(limit);
+
+    res.json({ 
+      success: true, 
+      records, 
+      message: "Data fetched successfully!" 
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 // ==========================================
 // ☁️ CLOUD SYNC SCHEMA & ROUTE (REMAINS SAME)
 // ==========================================
